@@ -115,7 +115,8 @@ async def send_toy_command(code, action="vibrate", channel="sx", intensity=50, d
             result["channel"] = channel
         return result
 
-# ===== 核心修改：根路径 POST =====
+# ===== 核心：同时支持 /mcp 和根路径 =====
+@app.route('/mcp', methods=['POST'])
 @app.route('/', methods=['POST'])
 def mcp_handler():
     data = request.get_json()
