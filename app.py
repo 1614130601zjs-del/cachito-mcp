@@ -34,8 +34,6 @@ DEVICE_CONFIG = {
             }
         }
     },
-    }
-    },
     36: {
         "name": "偷欢pro",
         "channels": {
@@ -117,8 +115,9 @@ async def send_toy_command(code, action="vibrate", channel="sx", intensity=50, d
             result["channel"] = channel
         return result
 
-# MCP JSON-RPC 端点（POST 请求）
+# ===== 关键：同时保留 /mcp 和 / 两个路由 =====
 @app.route('/mcp', methods=['POST'])
+@app.route('/', methods=['POST'])
 def mcp_handler():
     data = request.get_json()
     if not data:
@@ -177,11 +176,9 @@ def mcp_handler():
 
     return jsonify({"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": "Method not found"}}), 404
 
-# 健康检查根路径
 @app.route('/')
 def index():
     return "Cachito Universal MCP OK"
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=8080)
