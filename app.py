@@ -1,4 +1,4 @@
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 import asyncio
 import httpx
 import json
@@ -124,8 +124,4 @@ async def toy_control(
     return await send_command(code, action, channel, intensity, duration)
 
 if __name__ == "__main__":
-    # 适配云平台动态端口 (比如 Render 默认会注入 PORT 环境变量)
-    port = int(os.environ.get("PORT", 8080))
-    
-    # 关键修改：使用 streamable-http 替代 sse，彻底抛弃 SSE
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=port, path="/mcp")
+    mcp.run(transport="sse", host="0.0.0.0", port=8080, path="/mcp")
