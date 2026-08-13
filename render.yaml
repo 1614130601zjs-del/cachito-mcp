@@ -1,7 +1,10 @@
 services:
-  - type: worker        # ← 改成 worker，不是 web
+  - type: web
     name: cachito-mcp
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: python app.py
+    startCommand: gunicorn -b 0.0.0.0:$PORT app:app
+    envVars:
+      - key: CACHITO_ACCOUNT
+        value: "52575934"
