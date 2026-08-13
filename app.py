@@ -1,8 +1,11 @@
 from fastmcp import FastMCP
-import asyncio
 import httpx
 import json
 import os
+import uvicorn
+from starlette.applications import Starlette
+from starlette.routing import Mount
+from starlette.responses import JSONResponse
 
 ACCOUNT = os.environ.get("CACHITO_ACCOUNT", "52575934")
 
@@ -111,7 +114,8 @@ async def send_command(code, action, channel, intensity, duration):
             result["channel"] = channel
         return result
 
-mcp = FastMCP("Cachito Universal MCP")
+# ==== 关键：创建 MCP 实例，消息端点设为 /messages/ ====
+mcp = FastMCP("Cachito Universal MCP", endpoint="/messages/")
 
 @mcp.tool()
 async def toy_control(
@@ -123,5 +127,17 @@ async def toy_control(
 ) -> dict:
     return await send_command(code, action, channel, intensity, duration)
 
+# 获取 SSE 应用
+sse_app = mcp.sse_app()
+
+# ==== 将整个 MCP 服务挂载到 /mcp 路径下 ====
+app = Starlette(routes=[
+    Mount("/mcp", app=sse_app),
+])
+
+@app.route("/")
+async def root(request):
+    return JSONResponse({"status": "Cachito MCP Server running", "endpoint": "/mcp"})
+
 if __name__ == "__main__":
-    mcp.run(transport="sse", host="0.0.0.0", port=8080, path="/mcp")
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
