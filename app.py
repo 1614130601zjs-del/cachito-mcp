@@ -115,7 +115,7 @@ async def send_toy_command(code, action="vibrate", channel="sx", intensity=50, d
             result["channel"] = channel
         return result
 
-# ===== 核心：同时支持 /mcp 和根路径 =====
+# ===== 关键：同时保留 /mcp 和 / 两个路由 =====
 @app.route('/mcp', methods=['POST'])
 @app.route('/', methods=['POST'])
 def mcp_handler():
