@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-import os
-os.environ["FORWARDED_ALLOW_IPS"] = "*"
 import json, os, logging, copy
 from typing import Optional
 import httpx, uvicorn
 from mcp.server import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("cachito-mcp")
@@ -116,11 +115,11 @@ def resolve_ch(cfg, user_ch):
         m = CHANNEL_MAP[ch]
         if m in channels:
             return m, None
-        return None, f"不支持'{user_ch}'，可用: {', '.join(f'{k}({v["label"]})' for k,v in channels.items())}"
+        return None, f"不支持'{user_ch}'，可用: {', '.join(f'{k}({v[\"label\"]})' for k,v in channels.items())}"
     for code, info in channels.items():
         if ch in info["label"].lower() or info["label"].lower() in ch:
             return code, None
-    return None, f"无法识别'{user_ch}'，可用: {', '.join(f'{k}({v["label"]})' for k,v in channels.items())}"
+    return None, f"无法识别'{user_ch}'，可用: {', '.join(f'{k}({v[\"label\"]})' for k,v in channels.items())}"
 
 async def join(client, code):
     data = await api_post(client, "joinRemote", {"account": ACCOUNT, "code": code})
@@ -149,7 +148,7 @@ async def send_cmd(client, code, dev_id, cfg, ch, action, intensity, duration):
                 "command": cmd, "message": f"{cfg['name']} {c['label']} 已{desc}"}
     return {"success": False, "error": res.get("message", "发送失败"), "detail": res}
 
-server = MCPServer("cachito-universal-mcp")
+server = MCPServer("cachito-universal-mcpiversal-mcp")
 
 @server.tool(name="toy_control")
 async def toy_control(code: str, action: str = "vibrate", channel: str = "吮吸",
@@ -195,12 +194,14 @@ async def discover_devices() -> str:
         "channelAliases": CHANNEL_MAP
     }, ensure_ascii=False, indent=2)
 
-app = server.streamable_http_app(streamable_http_path="/mcp")
+# 关键修复：禁用 DNS 重绑定保护，避免 Render 421 错误
+app = server.streamable_http_app(
+    streamable_http_path="/mcp",
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False)
+)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     host = os.environ.get("HOST", "0.0.0.0")
     logger.info(f"Running at http://{host}:{port}/mcp")
     uvicorn.run(app, host=host, port=port, proxy_headers=True)
-
-
