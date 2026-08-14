@@ -273,56 +273,172 @@ async def send_command(code, dev_id, cfg, ch, action, intensity, duration):
     c = cfg["channels"][ch]
     if action == "stop":
         cmd = c["stop"]
+"""
+Cachito 万能遥控器 MCP 服务
+支持全系列设备自动识别，调用者自行选择通道（sx / pj / both）
+JSON-RPC over HTTP POST，兼容标准 MCP 客户端
+"""
+import json
+import os
+import httpx
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Route
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
+import uvicorn
+
+ACCOUNT = os.environ.get("CACHITO_ACCOUNT", "你的账号ID")
+code = None
+
+# ============================================================
+# 全系列设备指令配置（从官方 APP 反编译提取）
+# ============================================================
+DEVICE_CONFIG = {
+    13: {
+        "name": "小猫爪",
+        "channels": {
+            "sx": {
+                "template": "710001**-0400-####-0302-{hex}00000000",
+                "stop": "710001**-0400-####-0601-0200000000",
+                "formula": lambda i: round(i * 0.75 + 25)
+            }
+        }
+    },
+    22: {
+        "name": "失控2.0",
+        "channels": {
+            "sx": {
+                "template": "710002**-0400-####-0302-{hex}00000000",
+                "stop": "710002**-0400-####-0302-0000000000",
+                "formula": lambda i: round(i * 0.75 + 25)
+            },
+            "pj": {
+                "template": "710002**-0400-####-050A-{hex}00000000",
+                "stop": "710002**-0400-####-0601-0000000000",
+                "formula": lambda i: round(i * 0.75 + 25)
+            }
+        }
+    },
+    36: {
+        "name": "偷欢pro",
+        "channels": {
+            "sx": {
+                "template": "71000C**-8200-####-0100-{hex}000002",
+                "stop": "71000C**-0F00-####-0100-0000000000",
+                "formula": lambda i: round(i * 0.5 + 50)
+            }
+        }
+    },
+    38: {
+        "name": "SK4",
+        "channels": {
+            "sx": {
+                "template": "710017**-5100-####-0100-{hex}000002",
+                "stop": "710017**-0100-####-0100-6400000002",
+                "formula": lambda i: round(i * 0.5 + 50)
+            }
+        }
+    },
+}
+
+# ============================================================
+# 核心业务逻辑
+# ============================================================
+
+async def get_device_id(invite_code: str):
+    """通过邀请码获取设备ID"""
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            "https://www.youtao.top/api/appRemote/getRemoteInfo",
+            json={"account": ACCOUNT, "code": invite_code}
+        )
+        data = r.json()
+        if data.get("code") != 0:
+            return None, data.get("message")
+        return data.get("data", {}).get("remote", {}).get("deviceId"), None
+
+async def toy_join(invite_code: str) -> str:
+    """加入远程控制"""
+    global code
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            "https://www.youtao.top/api/appRemote/joinRemote",
+            json={"account": ACCOUNT, "code": invite_code}
+        )
+        result = r.json()
+        if result.get("code") == 0:
+            code = invite_code
+            return "加入成功！邀请码已就绪。"
+        return f"加入失败: {result.get('message')}。请重新生成邀请码。"
+
+async def _send_single_channel(action: str, channel: str, intensity: int, duration: int) -> str:
+    """发送单个通道的指令（内部函数）"""
+    global code
+    device_id, err = await get_device_id(code)
+    if err:
+        return f"获取设备信息失败: {err}"
+    if device_id not in DEVICE_CONFIG:
+        return f"不支持的设备ID: {device_id}"
+
+    config = DEVICE_CONFIG[device_id]
+    if channel not in config["channels"]:
+        return f"设备 {config['name']} 不支持 '{channel}' 通道"
+
+    channel_config = config["channels"][channel]
+
+    if action == "stop":
+        cmd = channel_config["stop"]
         time_ms = 500
+        label = f"{config['name']} {channel}端 已停止"
     else:
-        v = max(0, min(100, intensity))
-        cmd = c["template"].replace("{intensity_hex}", format(c["formula"](v), "02x"))
-        time_ms = max(500, duration)
+        hex_val = format(channel_config["formula"](intensity), '02x')
+        cmd = channel_config["template"].replace("{hex}", hex_val)
+        time_ms = duration
+        label = f"{config['name']} {channel}端 强度{intensity}%，持续{duration/1000}秒"
+
     payload = json.dumps([{"command": cmd, "time": str(time_ms), "progress": 0}])
-    key = "pjCommand" if ch == "pj" else "sxCommand"
-    res = await api_post("sendCommand", {
-        "command": {key: payload, "deviceId": dev_id},
-        "account": ACCOUNT,
-        "code": code
-    })
-    if res.get("code") == 0:
-        return "ok"
-    return "fail: " + res.get("message", "发送失败")
+    cmd_key = "pjCommand" if channel == "pj" else "sxCommand"
 
-async def do_join(invite_code):
-    global current_code, current_device_id, current_device_name, current_config
-    dev_id, dev_name, err = await get_device_info(invite_code)
-    if err:
-        return "fail: " + err
-    err = await join_remote(invite_code)
-    if err:
-        return "fail: " + err
-    cfg, kw = match_config(dev_name)
-    cfg = inject_id(cfg, dev_id)
-    current_code = invite_code
-    current_device_id = dev_id
-    current_device_name = dev_name
-    current_config = cfg
-    return "ok"
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            "https://www.youtao.top/api/appRemote/sendCommand",
+            json={
+                "command": {cmd_key: payload, "deviceId": device_id},
+                "account": ACCOUNT,
+                "code": code
+            }
+        )
+        result = r.json()
+        if result.get("code") == 0:
+            return label + " ✓"
+        return f"指令失败: {result.get('message')}"
 
-async def do_control(action, channel, intensity, duration):
-    global current_code, current_device_id, current_config
-    if not current_code:
-        return "fail: 请先调用 toy_join 设置邀请码"
-    if not current_config:
-        return "fail: 设备未初始化"
-    ch, err = resolve_channel(current_config, channel)
-    if err:
-        return "fail: " + err
-    return await send_command(
-        current_code, current_device_id, current_config, ch,
-        "stop" if action == "stop" else "vibrate",
-        intensity, duration
-    )
+async def toy_control(action: str, channel: str = "sx", intensity: int = 30, duration: int = 3000) -> str:
+    """通用控制函数，调用者通过 channel 参数自行决定控制哪个通道"""
+    global code
+    if not code:
+        return "还没加入远程。先让用户在APP生成邀请码，然后调用toy_join。"
+
+    if channel == "both":
+        sx_result = await _send_single_channel(action, "sx", intensity, duration)
+        pj_result = await _send_single_channel(action, "pj", intensity, duration)
+        return f"{sx_result}\n{pj_result}"
+
+    return await _send_single_channel(action, channel, intensity, duration)
+
+async def toy_state() -> str:
+    return f"邀请码: {code or '未设置'}"
+
+# ============================================================
+# MCP JSON-RPC 处理器
+# ============================================================
 
 async def handle_rpc(request: Request):
+    raw = await request.body()
     try:
-        body = await request.json()
+        body = json.loads(raw)
     except Exception:
         return JSONResponse(
             {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
@@ -332,7 +448,6 @@ async def handle_rpc(request: Request):
     method = body.get("method")
     params = body.get("params", {})
     req_id = body.get("id")
-    logger.info("RPC: %s", method)
 
     if method == "initialize":
         return JSONResponse({
@@ -340,7 +455,7 @@ async def handle_rpc(request: Request):
             "id": req_id,
             "result": {
                 "protocolVersion": "2024-11-05",
-                "serverInfo": {"name": "cachito-mcp", "version": "3.1"},
+                "serverInfo": {"name": "Cachito Universal MCP", "version": "1.0"},
                 "capabilities": {"tools": {}}
             }
         })
@@ -352,26 +467,35 @@ async def handle_rpc(request: Request):
         tools = [
             {
                 "name": "toy_join",
-                "description": "输入邀请码加入远程控制",
+                "description": "通过邀请码加入远程控制",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "invite_code": {"type": "string", "description": "APP生成的6位邀请码"}
+                        "invite_code": {"type": "string", "description": "APP生成的邀请码"}
                     },
                     "required": ["invite_code"]
                 }
             },
             {
                 "name": "toy_control",
-                "description": "控制设备启动或停止，支持中文指令：吮吸、入体、脉冲等",
+                "description": "控制设备震动或停止（自动识别设备类型，调用者自行决定通道）",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "action": {"type": "string", "enum": ["vibrate", "stop"], "default": "vibrate", "description": "vibrate启动，stop停止"},
-                        "channel": {"type": "string", "default": "吮吸", "description": "功能通道"},
-                        "intensity": {"type": "integer", "default": 50, "description": "强度0-100"},
+                        "action": {"type": "string", "enum": ["vibrate", "stop"], "description": "vibrate=震动, stop=停止"},
+                        "channel": {"type": "string", "enum": ["sx", "pj", "both"], "default": "sx", "description": "sx=吮吸端, pj=入体端, both=同时控制两端"},
+                        "intensity": {"type": "integer", "default": 30, "description": "强度 0-100"},
                         "duration": {"type": "integer", "default": 3000, "description": "持续时间(ms)"}
-                    }
+                    },
+                    "required": ["action"]
+                }
+            },
+            {
+                "name": "toy_state",
+                "description": "查看当前连接状态",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
                 }
             }
         ]
@@ -382,36 +506,40 @@ async def handle_rpc(request: Request):
         })
 
     if method == "tools/call":
-        name = params.get("name", "")
-        args = params.get("arguments", {})
-        if name == "toy_join":
-            result_text = await do_join(args.get("invite_code", ""))
-        elif name == "toy_control":
-            result_text = await do_control(
-                args.get("action", "vibrate"),
-                args.get("channel", "吮吸"),
-                args.get("intensity", 50),
-                args.get("duration", 3000)
-            )
+        tool_name = params.get("name", "")
+        arguments = params.get("arguments", {})
+
+        if tool_name == "toy_join":
+            invite_code = arguments.get("invite_code", "")
+            result_text = await toy_join(invite_code)
+        elif tool_name == "toy_control":
+            action = arguments.get("action", "")
+            channel = arguments.get("channel", "sx")
+            intensity = arguments.get("intensity", 30)
+            duration = arguments.get("duration", 3000)
+            result_text = await toy_control(action, channel, intensity, duration)
+        elif tool_name == "toy_state":
+            result_text = await toy_state()
         else:
             return JSONResponse({
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "error": {"code": -32602, "message": "Unknown tool: " + name}
+                "error": {"code": -32602, "message": f"Unknown tool: {tool_name}"}
             })
+
         return JSONResponse({
             "jsonrpc": "2.0",
             "id": req_id,
             "result": {
                 "content": [{"type": "text", "text": result_text}],
-                "isError": result_text.startswith("fail:")
+                "isError": False
             }
         })
 
     return JSONResponse({
         "jsonrpc": "2.0",
         "id": req_id,
-        "error": {"code": -32601, "message": "Method not found: " + str(method)}
+        "error": {"code": -32601, "message": f"Method not found: {method}"}
     })
 
 async def handle_mcp_get(request: Request):
@@ -421,6 +549,10 @@ async def handle_mcp_get(request: Request):
         "method": "POST only (JSON-RPC)",
         "protocolVersion": "2024-11-05"
     })
+
+# ============================================================
+# 启动配置
+# ============================================================
 
 middleware = [
     Middleware(
@@ -442,7 +574,5 @@ app = Starlette(
 )
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    host = os.environ.get("HOST", "0.0.0.0")
-    logger.info("Running at http://%s:%s/mcp", host, port)
-    uvicorn.run(app, host=host, port=port, workers=1)  # 关键：强制单 worker
+    port = int(os.environ.get("PORT", 8001))
+    uvicorn.run(app, host="0.0.0.0", port=port)
