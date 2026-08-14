@@ -1,6 +1,6 @@
 # Cachito 全线产品万能 MCP
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/你的用户名/cachito-universal-mcp)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/1614130601zjs-del/cachito-mcp)
 
 - 纯 HTTP Streamable，端点 `/mcp`
 - `device_id` 通过 `getRemoteInfo` 实时获取
