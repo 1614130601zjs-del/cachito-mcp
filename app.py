@@ -1,99 +1,4 @@
 #!/usr/bin/env python3
-import json, os, logging, copy
-import httpx, uvicorn
-from mcp.server import MCPServer
-from mcp.server.transport_security import TransportSecuritySettings
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("cachito-mcp")
-
-ACCOUNT = os.environ.get("CACHITO_ACCOUNT", "52575934")
-API_BASE = "https://www.youtao.top/api/appRemote"
-
-CHANNEL_MAP = {
-   "吮吸": "sx", "吸": "sx", "口吸": "sx", "秒潮": "sx", "舔": "sx",
-   "入体": "pj", "脉冲": "pj", "炮机": "pj", "抽插": "pj", "震动": "pj", "振": "pj", "伸缩": "pj",
-}
-
-DEVICE_TEMPLATES = {
-   "猫爪": {
-       "channels": {
-           "sx": {"template": "710001{id_hex2}-0400-{id_hex4}-0302-{intensity_hex}00000000",
-                  "stop": "710001{id_hex2}-0400-{id_hex4}-0601-0200000000",
-                  "formula": lambda i: round(i * 0.75 + 25), "label": "吮吸"}
-       }
-   },
-   "失控": {
-       "channels": {
-           "sx": {"template": "710002{id_hex2}-0400-{id_hex4}-0302-{intensity_hex}00000000",
-                  "stop": "710002{id_hex2}-0400-{id_hex4}-0302-0000000000",
-                  "formula": lambda i: round(i * 0.75 + 25), "label": "吮吸"},
-           "pj": {"template": "710002{id_hex2}-0400-{id_hex4}-050A-{intensity_hex}00000000",
-                  "stop": "710002{id_hex2}-0400-{id_hex4}-0601-0000000000",
-                  "formula": lambda i: round(i * 0.75 + 25), "label": "脉冲/入体"}
-       }
-   },
-   "偷欢": {
-       "channels": {
-           "sx": {"template": "71000C{id_hex2}-8200-{id_hex4}-0100-{intensity_hex}000002",
-                  "stop": "71000C{id_hex2}-0F00-{id_hex4}-0100-0000000000",
-                  "formula": lambda i: round(i * 0.5 + 50), "label": "吮吸"}
-       }
-   },
-   "漫步": {
-       "channels": {
-           "sx": {"template": "710017{id_hex2}-5100-{id_hex4}-0100-{intensity_hex}000002",
-                  "stop": "710017{id_hex2}-0100-{id_hex4}-0100-6400000002",
-                  "formula": lambda i: round(i * 0.5 + 50), "label": "吮吸"}
-       }
-   },
-   "SK": {
-       "channels": {
-           "sx": {"template": "710017{id_hex2}-5100-{id_hex4}-0100-{intensity_hex}000002",
-                  "stop": "710017{id_hex2}-0100-{id_hex4}-0100-6400000002",
-                  "formula": lambda i: round(i * 0.5 + 50), "label": "吮吸"}
-       }
-   },
-}
-
-GENERIC = {
-   "channels": {
-       "sx": {"template": "7100{id_hex2}-5100-{id_hex4}-0100-{intensity_hex}000002",
-              "stop": "7100{id_hex2}-0100-{id_hex4}-0100-6400000002",
-              "formula": lambda i: round(i * 0.5 + 50), "label": "吮吸（通用）"}
-   }
-}
-
-async def api_post(client, endpoint, payload):
-   try:
-       r = await client.post(f"{API_BASE}/{endpoint}", json=payload, timeout=15)
-       r.raise_for_status()
-       return r.json()
-   except Exception as e:
-       logger.error(f"API [{endpoint}] {e}")
-       return {"code": -1, "message": str(e)}
-
-async def get_device_info(client, code):
-   data = await api_post(client, "getRemoteInfo", {"account": ACCOUNT, "code": code})
-   if data.get("code") != 0:
-       return None, None, data.get("message", "获取失败")
-   remote = data.get("data", {}).get("remote", {})
-   dev_id = remote.get("deviceId")
-   dev_name = remote.get("deviceName", "未知")
-   if dev_id is None:
-       return None, None, "无设备ID"
-   logger.info(f"设备: {dev_name} (ID={dev_id})")
-   return dev_id, dev_name, None
-
-def match_config(name):
-   up = (name or "").upper()
-   for kw, tmpl in DEVICE_TEMPLATES.items():
-       if kw.upper() in up:
-           cfg = copy.deepcopy(tmpl)
-           cfg["name"] = name
-           return cfg, kw
-   logger.warning(f"'{name}' 未匹配，使用通用模板")
-#!/usr/bin/env python3
 import json
 import os
 import logging
@@ -349,10 +254,10 @@ async def discover_devices():
         "channelAliases": CHANNEL_MAP
     }, ensure_ascii=False, indent=2)
 
-# 关键修复：json_response=True 禁用 SSE，避免 mcp-remote 卡住
+# 关键修复：stateless_http=True 不需要 session ID
 app = server.streamable_http_app(
     streamable_http_path="/mcp",
-    json_response=True,
+    stateless_http=True,
     transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False)
 )
 
