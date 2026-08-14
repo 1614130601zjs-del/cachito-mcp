@@ -31,6 +31,16 @@ DEVICE_CONFIG = {
             }
         }
     },
+    15: {
+        "name": "设备15",
+        "channels": {
+            "sx": {
+                "template": "710004**-0400-####-0302-{hex}00000000",
+                "stop": "710004**-0400-####-0302-0000000000",
+                "formula": lambda i: round(i * 0.75 + 25)
+            }
+        }
+    },
     22: {
         "name": "失控2.0",
         "channels": {
@@ -43,6 +53,91 @@ DEVICE_CONFIG = {
                 "template": "710002**-0400-####-050A-{hex}00000000",
                 "stop": "710002**-0400-####-0601-0000000000",
                 "formula": lambda i: round(i * 0.75 + 25)
+            }
+        }
+    },
+    23: {
+        "name": "设备23",
+        "channels": {
+            "sx": {
+                "template": "710004**-0400-####-0302-{hex}00000000",
+                "stop": "710004**-0400-####-0302-0000000000",
+                "formula": lambda i: round(i * 0.75 + 25)
+            },
+            "pj": {
+                "template": "710000**-0400-####-050A-{hex}00000000",
+                "stop": "710000**-0400-####-0601-0000000000",
+                "formula": lambda i: round(i * 0.75 + 25)
+            }
+        }
+    },
+    24: {
+        "name": "设备24",
+        "channels": {
+            "sx": {
+                "template": "710000**-0400-####-0302-{hex}00000000",
+                "stop": "710000**-0400-####-0302-0000000000",
+                "formula": lambda i: i  # 直接使用强度值
+            },
+            "pj": {
+                "template": "710000**-0400-####-050A-{hex}00000000",
+                "stop": "710000**-0400-####-0601-0000000000",
+                "formula": lambda i: round(i * 0.75 + 25)
+            }
+        }
+    },
+    25: {
+        "name": "设备25",
+        "channels": {
+            "sx": {
+                "template": "710005**-0400-####-0302-{hex}00000000",
+                "stop": "710005**-0400-####-0302-0000000000",
+                "formula": lambda i: round(i * 0.75 + 25)
+            }
+        }
+    },
+    26: {
+        "name": "设备26",
+        "channels": {
+            "sx": {
+                "template": "710006**-0400-####-0302-{hex}00000000",
+                "stop": "710006**-0400-####-0302-0000000000",
+                "formula": lambda i: round(i * 0.75 + 25)
+            }
+        }
+    },
+    32: {
+        "name": "设备32",
+        "channels": {
+            "sx": {
+                "template": "710009**-8200-####-0100-{hex}000002",
+                "stop": "710009**-0F00-####-0100-3211643202",
+                "formula": lambda i: round(i * 0.5 + 50)
+            }
+        }
+    },
+    33: {
+        "name": "设备33",
+        "channels": {
+            "sx": {
+                "template": "71000A**-8200-####-0100-{hex}000002",
+                "stop": "71000A**-0F00-####-0100-0000000000",
+                "formula": lambda i: round(i * 0.5 + 50)
+            }
+        }
+    },
+    34: {
+        "name": "设备34",
+        "channels": {
+            "sx": {
+                "template": "710007**-8200-####-0100-{hex}000002",
+                "stop": "710007**-0200-####-0100-6400000002",
+                "formula": lambda i: round(i * 0.5 + 50)
+            },
+            "pj": {
+                "template": "710007**-8100-####-0100-0A{hex}1c0002",
+                "stop": "710007**-0100-####-0100-6400000002",
+                "formula": lambda i: round(60 - i * 0.57)
             }
         }
     },
@@ -62,6 +157,31 @@ DEVICE_CONFIG = {
             "sx": {
                 "template": "710017**-5100-####-0100-{hex}000002",
                 "stop": "710017**-0100-####-0100-6400000002",
+                "formula": lambda i: round(i * 0.5 + 50)
+            }
+        }
+    },
+    41: {
+        "name": "设备41",
+        "channels": {
+            "sx": {
+                "template": "71000B**-8200-####-0100-{hex}000002",
+                "stop": "71000B**-0200-####-0100-6400000002",
+                "formula": lambda i: round(i * 0.5 + 50)
+            },
+            "pj": {
+                "template": "71000B**-8100-####-0100-0A{hex}1c0002",
+                "stop": "71000B**-0100-####-0100-6400000002",
+                "formula": lambda i: round(60 - i * 0.57)
+            }
+        }
+    },
+    42: {
+        "name": "设备42",
+        "channels": {
+            "sx": {
+                "template": "71001A**-8200-####-0100-{hex}000002",
+                "stop": "71001A**-0200-####-0100-3211643202",
                 "formula": lambda i: round(i * 0.5 + 50)
             }
         }
@@ -121,7 +241,7 @@ async def _send_single_channel(action: str, channel: str, intensity: int, durati
         hex_val = format(channel_config["formula"](intensity), '02x')
         cmd = channel_config["template"].replace("{hex}", hex_val)
         time_ms = duration
-        # 修正：字符串内使用双引号避免引号冲突
+        # 使用双引号避免转义问题
         label = f"{config['name']} {channel}端 强度{intensity}%，持续{duration/1000}秒"
 
     payload = json.dumps([{"command": cmd, "time": str(time_ms), "progress": 0}])
