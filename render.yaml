@@ -14,5 +14,3 @@ services:
         value: "0.0.0.0"
       - key: PYTHONUNBUFFERED
         value: "1"
-      - key: UVICORN_TIMEOUT_KEEP_ALIVE
-        value: "5"
