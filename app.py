@@ -151,6 +151,112 @@ def resolve_channel(cfg, user_ch):
             return m, None
         avail = ", ".join(k + "(" + v["label"] + ")" for k, v in channels.items())
         return None, "不支持" + user_ch + "，可用: " + avail
+    for code, info in channels.items-0000000000",
+                "formula": lambda i: round(i * 0.75 + 25),
+                "label": "脉冲/入体"
+            }
+        }
+    },
+    "偷欢": {
+        "channels": {
+            "sx": {
+                "template": "71000C{id_hex2}-8200-{id_hex4}-0100-{intensity_hex}000002",
+                "stop": "71000C{id_hex2}-0F00-{id_hex4}-0100-0000000000",
+                "formula": lambda i: round(i * 0.5 + 50),
+                "label": "吮吸"
+            }
+        }
+    },
+    "漫步": {
+        "channels": {
+            "sx": {
+                "template": "710017{id_hex2}-5100-{id_hex4}-0100-{intensity_hex}000002",
+                "stop": "710017{id_hex2}-0100-{id_hex4}-0100-6400000002",
+                "formula": lambda i: round(i * 0.5 + 50),
+                "label": "吮吸"
+            }
+        }
+    },
+    "SK": {
+        "channels": {
+            "sx": {
+                "template": "710017{id_hex2}-5100-{id_hex4}-0100-{intensity_hex}000002",
+                "stop": "710017{id_hex2}-0100-{id_hex4}-0100-6400000002",
+                "formula": lambda i: round(i * 0.5 + 50),
+                "label": "吮吸"
+            }
+        }
+    },
+}
+
+GENERIC = {
+    "channels": {
+        "sx": {
+            "template": "7100{id_hex2}-5100-{id_hex4}-0100-{intensity_hex}000002",
+            "stop": "7100{id_hex2}-0100-{id_hex4}-0100-6400000002",
+            "formula": lambda i: round(i * 0.5 + 50),
+            "label": "吮吸（通用）"
+        }
+    }
+}
+
+current_code = None
+current_device_id = None
+current_device_name = None
+current_config = None
+
+async def api_post(endpoint, payload):
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(API_BASE + "/" + endpoint, json=payload, timeout=15)
+            r.raise_for_status()
+            return r.json()
+    except Exception as e:
+        logger.error("API [%s] %s", endpoint, e)
+        return {"code": -1, "message": str(e)}
+
+async def get_device_info(code):
+    data = await api_post("getRemoteInfo", {"account": ACCOUNT, "code": code})
+    if data.get("code") != 0:
+        return None, None, data.get("message", "获取失败")
+    remote = data.get("data", {}).get("remote", {})
+    dev_id = remote.get("deviceId")
+    dev_name = remote.get("deviceName", "未知")
+    if dev_id is None:
+        return None, None, "无设备ID"
+    return dev_id, dev_name, None
+
+def match_config(name):
+    up = (name or "").upper()
+    for kw, tmpl in DEVICE_TEMPLATES.items():
+        if kw.upper() in up:
+            cfg = copy.deepcopy(tmpl)
+            cfg["name"] = name
+            return cfg, kw
+    cfg = copy.deepcopy(GENERIC)
+    cfg["name"] = name
+    return cfg, "通用"
+
+def inject_id(cfg, dev_id):
+    h2 = format(dev_id, "02x")
+    h4 = format(dev_id, "04x")
+    for ch in cfg.get("channels", {}).values():
+        for k in ("template", "stop"):
+            if k in ch:
+                ch[k] = ch[k].replace("{id_hex2}", h2).replace("{id_hex4}", h4)
+    return cfg
+
+def resolve_channel(cfg, user_ch):
+    ch = user_ch.strip().lower()
+    channels = cfg.get("channels", {})
+    if ch in channels:
+        return ch, None
+    if ch in CHANNEL_MAP:
+        m = CHANNEL_MAP[ch]
+        if m in channels:
+            return m, None
+        avail = ", ".join(k + "(" + v["label"] + ")" for k, v in channels.items())
+        return None, "不支持" + user_ch + "，可用: " + avail
     for code, info in channels.items():
         if ch in info["label"].lower() or info["label"].lower() in ch:
             return code, None
@@ -185,7 +291,6 @@ async def send_command(code, dev_id, cfg, ch, action, intensity, duration):
 
 async def do_join(invite_code):
     global current_code, current_device_id, current_device_name, current_config
-    current_code = invite_code
     dev_id, dev_name, err = await get_device_info(invite_code)
     if err:
         return "fail: " + err
@@ -194,6 +299,7 @@ async def do_join(invite_code):
         return "fail: " + err
     cfg, kw = match_config(dev_name)
     cfg = inject_id(cfg, dev_id)
+    current_code = invite_code
     current_device_id = dev_id
     current_device_name = dev_name
     current_config = cfg
@@ -234,7 +340,7 @@ async def handle_rpc(request: Request):
             "id": req_id,
             "result": {
                 "protocolVersion": "2024-11-05",
-                "serverInfo": {"name": "cachito-mcp", "version": "3.0"},
+                "serverInfo": {"name": "cachito-mcp", "version": "3.1"},
                 "capabilities": {"tools": {}}
             }
         })
@@ -339,4 +445,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     host = os.environ.get("HOST", "0.0.0.0")
     logger.info("Running at http://%s:%s/mcp", host, port)
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run(app, host=host, port=port, workers=1)  # 关键：强制单 worker
