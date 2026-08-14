@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import os
+os.environ["FORWARDED_ALLOW_IPS"] = "*"
 import json, os, logging, copy
 from typing import Optional
 import httpx, uvicorn
