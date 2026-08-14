@@ -5,8 +5,12 @@ import logging
 import copy
 import httpx
 import uvicorn
-from mcp.server import MCPServer
-from mcp.server.transport_security import TransportSecuritySettings
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Route
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("cachito-mcp")
@@ -140,16 +144,12 @@ def resolve_ch(cfg, user_ch):
         m = CHANNEL_MAP[ch]
         if m in channels:
             return m, None
-        parts = []
-        for k, v in channels.items():
-            parts.append(k + "(" + v["label"] + ")")
+        parts = [k + "(" + v["label"] + ")" for k, v in channels.items()]
         return None, "不支持" + user_ch + "，可用: " + ", ".join(parts)
     for code, info in channels.items():
         if ch in info["label"].lower() or info["label"].lower() in ch:
             return code, None
-    parts = []
-    for k, v in channels.items():
-        parts.append(k + "(" + v["label"] + ")")
+    parts = [k + "(" + v["label"] + ")" for k, v in channels.items()]
     return None, "无法识别" + user_ch + "，可用: " + ", ".join(parts)
 
 async def join_remote(client, code):
@@ -163,106 +163,193 @@ async def send_cmd(client, code, dev_id, cfg, ch, action, intensity, duration):
     if action == "stop":
         cmd = c["stop"]
         time_ms = 500
-        desc = "停止"
     else:
         v = max(0, min(100, intensity))
         cmd = c["template"].replace("{intensity_hex}", format(c["formula"](v), "02x"))
         time_ms = max(500, duration)
-        desc = "强度" + str(v) + "%"
     payload = json.dumps([{"command": cmd, "time": str(time_ms), "progress": 0}])
     key = "pjCommand" if ch == "pj" else "sxCommand"
     res = await api_post(client, "sendCommand", {
         "command": {key: payload, "deviceId": dev_id},
-        "account": ACCOUNT,
-        "code": code
+        "account": ACCOUNT, "code": code
     })
     if res.get("code") == 0:
-        msg = cfg["name"] + " " + c["label"] + " 已" + desc
-        return {
-            "success": True,
-            "device": cfg["name"],
-            "deviceId": dev_id,
-            "channel": ch,
-            "channelLabel": c["label"],
-            "action": action,
-            "intensity": intensity if action != "stop" else 0,
-            "duration": time_ms,
-            "command": cmd,
-            "message": msg
-        }
-    return {"success": False, "error": res.get("message", "发送失败"), "detail": res}
+        return "ok"
+    return "fail: " + res.get("message", "发送失败")
 
-server = MCPServer("cachito-universal-mcp")
-
-@server.tool(name="toy_control")
-async def toy_control(code, action="vibrate", channel="吮吸", intensity=50, duration=3000):
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            dev_id, dev_name, err = await get_device_info(client, code)
-            if err:
-                return json.dumps({"success": False, "error": err}, ensure_ascii=False)
-            cfg, kw = match_config(dev_name)
-            cfg = inject_id(cfg, dev_id)
-            ch, err = resolve_ch(cfg, channel)
-            if err:
-                return json.dumps({"success": False, "error": err}, ensure_ascii=False)
-            err = await join_remote(client, code)
-            if err:
-                return json.dumps({"success": False, "error": err}, ensure_ascii=False)
-            result = await send_cmd(
-                client, code, dev_id, cfg, ch,
-                "stop" if action == "stop" else "vibrate",
-                intensity, duration
-            )
-            return json.dumps(result, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.exception("toy_control 异常")
-        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
-
-@server.tool(name="list_devices")
-async def list_devices(code):
+async def do_toy_control(code, action, channel, intensity, duration):
     async with httpx.AsyncClient() as client:
         dev_id, dev_name, err = await get_device_info(client, code)
         if err:
-            return json.dumps({"success": False, "error": err}, ensure_ascii=False)
+            return "fail: " + err
         cfg, kw = match_config(dev_name)
         cfg = inject_id(cfg, dev_id)
-        chs = {}
-        for k, v in cfg["channels"].items():
-            chs[k] = {"name": v["label"], "code": k}
-        return json.dumps({
-            "success": True,
-            "deviceId": dev_id,
-            "deviceName": dev_name,
-            "matchedTemplate": kw,
-            "channels": chs,
-            "account": ACCOUNT
-        }, ensure_ascii=False, indent=2)
+        ch, err = resolve_ch(cfg, channel)
+        if err:
+            return "fail: " + err
+        err = await join_remote(client, code)
+        if err:
+            return "fail: " + err
+        return await send_cmd(
+            client, code, dev_id, cfg, ch,
+            "stop" if action == "stop" else "vibrate",
+            intensity, duration
+        )
 
-@server.tool(name="discover_devices")
-async def discover_devices():
-    devices = []
-    for k, t in DEVICE_TEMPLATES.items():
-        chs = []
-        for c, v in t["channels"].items():
-            chs.append({"code": c, "name": v["label"]})
-        devices.append({"keyword": k, "channels": chs})
-    return json.dumps({
-        "success": True,
-        "note": "device_id 通过 getRemoteInfo 实时获取",
-        "devices": devices,
-        "channelAliases": CHANNEL_MAP
-    }, ensure_ascii=False, indent=2)
+async def do_list_devices(code):
+    async with httpx.AsyncClient() as client:
+        dev_id, dev_name, err = await get_device_info(client, code)
+        if err:
+            return "fail: " + err
+        cfg, kw = match_config(dev_name)
+        cfg = inject_id(cfg, dev_id)
+        parts = [v["label"] + "(" + k + ")" for k, v in cfg["channels"].items()]
+        return dev_name + " | " + ", ".join(parts)
 
-# 关键修复：stateless_http=True 不需要 session ID
-app = server.streamable_http_app(
-    streamable_http_path="/mcp",
-    stateless_http=True,
-    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False)
+async def do_discover_devices():
+    lines = []
+    for kw, t in DEVICE_TEMPLATES.items():
+        chs = ", ".join(v["label"] for v in t["channels"].values())
+        lines.append(kw + ": " + chs)
+    return "; ".join(lines)
+
+async def handle_rpc(request: Request):
+    raw = await request.body()
+    logger.info("RPC: %s", raw.decode())
+
+    try:
+        body = json.loads(raw)
+    except Exception:
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
+            status_code=400
+        )
+
+    method = body.get("method")
+    params = body.get("params", {})
+    req_id = body.get("id")
+
+    if method == "initialize":
+        return JSONResponse({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "serverInfo": {"name": "cachito-universal-mcp", "version": "2.0"},
+                "capabilities": {"tools": {}}
+            }
+        })
+
+    if method == "notifications/initialized":
+        return JSONResponse({}, status_code=202)
+
+    if method == "tools/list":
+        tools = [
+            {
+                "name": "toy_control",
+                "description": "控制设备，支持中文指令：吮吸、入体、脉冲等",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "code": {"type": "string", "description": "邀请码"},
+                        "action": {"type": "string", "enum": ["vibrate", "stop"], "default": "vibrate"},
+                        "channel": {"type": "string", "default": "吮吸"},
+                        "intensity": {"type": "integer", "default": 50},
+                        "duration": {"type": "integer", "default": 3000}
+                    },
+                    "required": ["code"]
+                }
+            },
+            {
+                "name": "list_devices",
+                "description": "查询设备信息",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "code": {"type": "string"}
+                    },
+                    "required": ["code"]
+                }
+            },
+            {
+                "name": "discover_devices",
+                "description": "获取支持的设备清单",
+                "inputSchema": {"type": "object", "properties": {}}
+            }
+        ]
+        return JSONResponse({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {"tools": tools}
+        })
+
+    if method == "tools/call":
+        name = params.get("name", "")
+        args = params.get("arguments", {})
+
+        if name == "toy_control":
+            result_text = await do_toy_control(
+                args.get("code", ""),
+                args.get("action", "vibrate"),
+                args.get("channel", "吮吸"),
+                args.get("intensity", 50),
+                args.get("duration", 3000)
+            )
+        elif name == "list_devices":
+            result_text = await do_list_devices(args.get("code", ""))
+        elif name == "discover_devices":
+            result_text = await do_discover_devices()
+        else:
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": -32602, "message": "Unknown tool: " + name}
+            })
+
+        return JSONResponse({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "content": [{"type": "text", "text": result_text}],
+                "isError": result_text.startswith("fail:")
+            }
+        })
+
+    return JSONResponse({
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "error": {"code": -32601, "message": "Method not found: " + str(method)}
+    })
+
+async def handle_mcp_get(request: Request):
+    return JSONResponse({
+        "status": "MCP server running",
+        "endpoint": "/mcp",
+        "method": "POST only (JSON-RPC)",
+        "protocolVersion": "2024-11-05"
+    })
+
+middleware = [
+    Middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+        allow_credentials=True,
+    )
+]
+
+app = Starlette(
+    middleware=middleware,
+    routes=[
+        Route("/mcp", handle_rpc, methods=["POST"]),
+        Route("/mcp", handle_mcp_get, methods=["GET"]),
+        Route("/", lambda r: JSONResponse({"status": "ok", "mcp_endpoint": "/mcp"}), methods=["GET"])
+    ]
 )
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     host = os.environ.get("HOST", "0.0.0.0")
     logger.info("Running at http://%s:%s/mcp", host, port)
-    uvicorn.run(app, host=host, port=port, proxy_headers=True)
+    uvicorn.run(app, host=host, port=port)
