@@ -1,16 +1,10 @@
 services:
   - type: web
-    name: cachito-universal-mcp
-    runtime: python
+    name: cachito-mcp
+    env: python
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: python app.py
     envVars:
       - key: CACHITO_ACCOUNT
-        value: "52575934"
-      - key: PORT
-        value: "8080"
-      - key: HOST
-        value: "0.0.0.0"
-      - key: PYTHONUNBUFFERED
-        value: "1"
+        value: 52575934
