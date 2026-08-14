@@ -4,10 +4,6 @@
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/1614130601zjs-del/cachito-mcp)
 
-## 部署后使用
-
-MCP 地址：`https://cachito-mcp.onrender.com/mcp`
-
 ## 工具说明
 
 ### toy_join
