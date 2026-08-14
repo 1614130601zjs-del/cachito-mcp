@@ -2,7 +2,7 @@
 
 全系列设备自动识别，支持吮吸 / 入体 / 同时控制，MCP 协议接入。
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/你的用户名/cachito-mcp)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/1614130601zjs-del/cachito-mcp)
 
 ## 部署后使用
 
